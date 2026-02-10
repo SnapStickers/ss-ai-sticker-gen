@@ -1,5 +1,7 @@
 export default async function handler(req, res) {
-  // ---- CORS (required for Shopify/browser) ----
+  // =========================
+  // CORS (required for Shopify)
+  // =========================
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -13,36 +15,53 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ---- Validate env ----
+    // =========================
+    // ENV CHECK
+    // =========================
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({
-        error: "Missing OPENAI_API_KEY on server",
-        hint: "Set it in Vercel Project → Settings → Environment Variables (Production) then redeploy.",
+        error: "Missing OPENAI_API_KEY",
+        hint: "Set it in Vercel → Project Settings → Environment Variables (Production) and redeploy",
       });
     }
 
     const { shape, material, details } = req.body || {};
 
     if (!shape || !material) {
-      return res.status(400).json({ error: "Missing shape or material" });
+      return res.status(400).json({
+        error: "Missing required fields",
+        required: ["shape", "material"],
+      });
     }
 
-    // ---- Prompt (keep it simple for now) ----
+    // =========================
+    // PROMPT (print-safe)
+    // =========================
     const prompt = `
-Create a print-ready sticker design (flat vector-like look, clean lines, high contrast).
-Shape: ${shape}
-Material: ${material}
-Customer details: ${details || "No extra details"}
+Create a clean, print-ready sticker design.
 
-Rules:
-- Centered design, no mockups, no photos of hands, no background scene.
-- Solid background or transparent-feeling simple background.
-- Bold, readable, sticker-friendly composition.
-- If text is requested, keep it short and legible.
+Sticker requirements:
+- Shape: ${shape}
+- Material: ${material}
+- Style: flat, vector-style illustration
+- High contrast, bold lines, sticker-friendly
+- No mockups, no hands, no photos, no background scenes
+- Centered composition
+- White or transparent-style background
+
+Design notes from customer:
+${details || "No additional details provided."}
+
+If text is included:
+- Keep it short
+- Large, readable lettering
+- Print-safe spacing
 `.trim();
 
-    // ---- OpenAI image generation ----
-    const r = await fetch("https://api.openai.com/v1/images/generations", {
+    // =========================
+    // OPENAI IMAGE GENERATION
+    // =========================
+    const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -52,39 +71,52 @@ Rules:
         model: "gpt-image-1",
         prompt,
         size: "1024x1024",
-        response_format: "b64_json",
       }),
     });
 
-    const data = await r.json();
+    const result = await response.json();
 
-    if (!r.ok) {
+    if (!response.ok) {
       return res.status(500).json({
-        error: "OpenAI request failed",
-        status: r.status,
-        openai: data,
+        error: "OpenAI API error",
+        status: response.status,
+        details: result,
       });
     }
 
-    const b64 = data?.data?.[0]?.b64_json;
-    if (!b64) {
+    // =========================
+    // IMPORTANT FIX:
+    // gpt-image-1 returns base64
+    // =========================
+    const base64Image = result?.data?.[0]?.b64_json;
+
+    if (!base64Image) {
       return res.status(500).json({
         error: "No image returned from OpenAI",
-        openai: data,
+        raw: result,
       });
     }
 
-    const imageUrl = `data:image/png;base64,${b64}`;
+    // Shopify-friendly image
+    const imageUrl = `data:image/png;base64,${base64Image}`;
 
+    // =========================
+    // SUCCESS RESPONSE
+    // =========================
     return res.status(200).json({
-      imageUrl,     // <-- IMPORTANT: your Shopify UI is looking for this
+      imageUrl, // 👈 your Shopify UI expects this
       prompt,
-      meta: { shape, material },
+      meta: {
+        shape,
+        material,
+      },
     });
   } catch (err) {
+    console.error("Sticker generation error:", err);
+
     return res.status(500).json({
       error: "Server error",
-      message: String(err?.message || err),
+      message: err?.message || String(err),
     });
   }
 }
