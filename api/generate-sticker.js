@@ -1,34 +1,20 @@
 import OpenAI from "openai";
 
-/**
- * SNAP STICKERS — Vercel API route
- * File: /api/generate-sticker.js
- *
- * MVP behavior:
- * - Accepts the frontend payload we designed earlier
- * - Validates all user-entered fields at <= 100 words
- * - Builds a much richer hidden sticker-generation prompt
- * - Calls OpenAI image generation
- * - Returns a base64 PNG as a data URL for immediate display/download
- *
- * Before deploying:
- * 1) npm install openai
- * 2) Add OPENAI_API_KEY in Vercel env vars
- *
- * Notes:
- * - This version does NOT save images yet
- * - This version does NOT enforce the 3-generation account limit yet
- * - This version assumes your Shopify frontend already handles "must be logged in"
- */
-
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 const MAX_WORDS = 100;
-const ALLOWED_METHODS = new Set(["POST"]);
+const ALLOWED_METHODS = new Set(["POST", "OPTIONS"]);
+
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
 
 function json(res, status, body) {
+  setCors(res);
   res.status(status).setHeader("Content-Type", "application/json");
   res.send(JSON.stringify(body));
 }
@@ -166,27 +152,19 @@ function shapeGuidance(shape) {
   }
 
   if (s.includes("square")) {
-    return [
-      "Compose the design to sit comfortably in a square format with balanced spacing.",
-    ].join(" ");
+    return "Compose the design to sit comfortably in a square format with balanced spacing.";
   }
 
   if (s.includes("rectangle")) {
-    return [
-      "Compose the design to fit a rectangular sticker with strong horizontal balance.",
-    ].join(" ");
+    return "Compose the design to fit a rectangular sticker with strong horizontal balance.";
   }
 
   if (s.includes("oval")) {
-    return [
-      "Compose the design to fit an oval sticker with a soft central focus.",
-    ].join(" ");
+    return "Compose the design to fit an oval sticker with a soft central focus.";
   }
 
   if (s.includes("rounded")) {
-    return [
-      "Compose the design for a rounded-corner sticker with safe margins near the edges.",
-    ].join(" ");
+    return "Compose the design for a rounded-corner sticker with safe margins near the edges.";
   }
 
   return "Compose the design so it adapts cleanly to the selected sticker shape.";
@@ -308,9 +286,7 @@ function buildStickerPrompt(answers) {
   sections.push(textGuidance(answers));
 
   if (answers.avoid) {
-    sections.push(
-      `Avoid these elements or treatments: ${answers.avoid}. Follow this strictly unless it conflicts with safe rendering.`
-    );
+    sections.push(`Avoid these elements or treatments: ${answers.avoid}. Follow this strictly unless it conflicts with safe rendering.`);
   }
 
   sections.push(
@@ -344,15 +320,20 @@ function buildStickerPrompt(answers) {
 function extractImageBase64(result) {
   const item = result?.data?.[0];
   if (!item) return null;
-
   if (item.b64_json) return item.b64_json;
   return null;
 }
 
 export default async function handler(req, res) {
+  setCors(res);
+
   try {
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+
     if (!ALLOWED_METHODS.has(req.method)) {
-      res.setHeader("Allow", "POST");
+      res.setHeader("Allow", "POST, OPTIONS");
       return json(res, 405, { error: "Method not allowed." });
     }
 
@@ -360,31 +341,26 @@ export default async function handler(req, res) {
       return json(res, 500, { error: "Server is missing OPENAI_API_KEY." });
     }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const body =
+      typeof req.body === "string"
+        ? JSON.parse(req.body || "{}")
+        : (req.body || {});
+
     const answers = sanitizeAnswers(body.answers || {});
     const finalPrompt = buildStickerPrompt(answers);
 
-    // TODO later:
-    // - verify Shopify customer session on the server
-    // - enforce 3 generations per account
-    // - save prompt + image record to a database
-    // - save image to blob/cloud storage
-
     const result = await client.images.generate({
-      model: "gpt-image-1.5",
+      model: "gpt-image-1",
       prompt: finalPrompt,
       size: "1024x1024",
-      quality: "high",
-      background: "transparent",
-      output_format: "png",
+      background: "transparent"
     });
 
     const imageBase64 = extractImageBase64(result);
 
     if (!imageBase64) {
       return json(res, 502, {
-        error: "OpenAI returned no image data.",
-        debug: result ? Object.keys(result) : null,
+        error: "OpenAI returned no image data."
       });
     }
 
@@ -397,15 +373,15 @@ export default async function handler(req, res) {
       finalPrompt,
       generationId: null,
       generationsRemaining: null,
-      promptVersion: "backend-sticker-mvp-v1",
+      promptVersion: "backend-sticker-mvp-v2"
     });
   } catch (error) {
     console.error("generate-sticker error:", error);
-
     const statusCode = error?.statusCode || error?.status || 500;
+
     return json(res, statusCode, {
       ok: false,
-      error: error?.message || "Something went wrong while generating the sticker.",
+      error: error?.message || "Something went wrong while generating the sticker."
     });
   }
 }
