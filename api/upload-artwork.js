@@ -1,5 +1,11 @@
 import { put } from "@vercel/blob";
 
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -26,27 +32,26 @@ export default async function handler(req, res) {
 
     const buffer = Buffer.concat(chunks);
 
-    const blob = await put(
-      `artwork/${Date.now()}.png`,
-      buffer,
-      {
-        access: "public",
-        contentType: "image/png",
-        addRandomSuffix: true
-      }
-    );
+    if (!buffer.length) {
+      return res.status(400).json({ error: "No image data received" });
+    }
+
+    const blob = await put(`artwork/${Date.now()}-sticker.png`, buffer, {
+      access: "public",
+      contentType: "image/png",
+      addRandomSuffix: true,
+    });
 
     return res.status(200).json({
       success: true,
-      url: blob.url
+      url: blob.url,
     });
-
   } catch (error) {
-    console.error(error);
+    console.error("Upload artwork error:", error);
 
     return res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message || "Upload failed",
     });
   }
 }
