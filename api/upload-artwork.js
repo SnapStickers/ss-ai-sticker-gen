@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     }
 
     const blob = await put(`artwork/${Date.now()}-sticker.png`, buffer, {
-      access: "private",
+      access: "public",
       contentType: "image/png",
       addRandomSuffix: true,
     });
